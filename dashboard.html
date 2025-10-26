@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Disaster Rescue Operations — TEAM INZORA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Main stylesheet -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+
+  <!-- Leaflet fallback -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    /* Map sizing */
+    #map{
+      height:60vh; min-height:320px; width:100%;
+      border:1px solid #173045; border-radius:12px;
+    }
+    /* Camera sizing (unchanged look) */
+    .medium-cam{ height:65vh; min-height:520px; display:flex; flex-direction:column; overflow:hidden; }
+    .cam-header{
+      flex:0 0 44px; display:flex; align-items:center; justify-content:space-between;
+      padding:0 16px; background:linear-gradient(90deg, #102330, #0b1a24); border-bottom:1px solid #173045;
+    }
+    .cam-wrapper{ flex:1 1 auto; position:relative; overflow:hidden; }
+    .cam-frame{ width:100%; height:100%; border:none; object-fit:cover; background:#000; }
+    .reticle{ pointer-events:none; }
+
+    /* Rescue Control button (top-right) */
+    .rescue-link{
+      text-decoration:none; margin-left:8px;
+      background:transparent; color:#cde8ff; border:1px solid #1f3b53;
+      border-radius:999px; padding:6px 12px; font-weight:600;
+    }
+    .rescue-link:hover{ border-color:#2c79a6; color:#fff; }
+
+    /* Prediction mini controls */
+    .predict .row { display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; }
+    .predict .inline { display:flex; gap:8px; align-items:center; }
+    .predict input[type="number"]{
+      width:90px; background:#0f1822; color:#e7f3ff; border:1px solid #193145; border-radius:8px; padding:6px 8px;
+    }
+    .mini-note{ font-size:12px; color:#7aa2c2; margin-top:6px; }
+
+    /* Comms chip + legend row before map */
+    .map-toprow{
+      display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;
+    }
+    .chip{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; border-radius:999px; border:1px solid #1f3b53; font-weight:600;
+      color:#cde8ff; background:linear-gradient(180deg, #0e1722, #0b121a);
+    }
+    .chip-dot{ width:8px; height:8px; border-radius:50%; background:#33e1a1; }
+    .chip.off .chip-dot{ background:#ff5c5c; }
+    .chip.off{ border-color:#5a2730; color:#ffbcbc; }
+
+    .legend{
+      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+      font-size:12px; color:#a8c9e6;
+    }
+    .swatch{
+      width:14px; height:14px; border-radius:3px; display:inline-block; margin-right:6px; border:1px solid rgba(0,0,0,.25);
+    }
+    .sw-green { background:#2aa84a; }
+    .sw-yellow{ background:#e6b800; }
+    .sw-orange{ background:#ff7a00; }
+    .sw-red   { background:#e33a3a; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+
+    <!-- ===== TOP BAR ===== -->
+    <header class="topbar">
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="title">DISASTER RESCUE OPERATIONS — TEAM INZORA</div>
+      <div class="ops-badges">
+        <span class="badge">OPS: 000254</span>
+        <span class="badge">CAM: {{ cam_url }}</span>
+        <span class="badge">LINK: GOOD</span>
+        <a class="rescue-link" href="https://rathinaminnovation.com/RTC/rescue/dashboard.html" target="_blank" rel="noopener">
+          RESCUE CONTROL ↗
+        </a>
+      </div>
+    </header>
+
+    <!-- ===== CAMERA ===== -->
+    <section class="viewport panel medium-cam">
+      <div class="cam-header">
+        <h2>Rescue Vision</h2>
+        <span class="cam-sub">Live Feed • Thermal & Optical</span>
+      </div>
+      <div class="cam-wrapper">
+        <iframe src="{{ cam_url }}" class="cam-frame" allow="autoplay" title="Live Camera"></iframe>
+        <div class="reticle"></div>
+      </div>
+    </section>
+
+    <!-- ===== PANELS BELOW CAMERA ===== -->
+    <div class="below-panels">
+      <!-- LEFT -->
+      <aside class="left">
+        <section class="panel system">
+          <h3>System Status</h3>
+          <div class="sys-row">
+            <div class="sys-card">
+              <div class="sys-title">BOT-01</div>
+              <div class="sys-sub">ONLINE • <span id="bot-mode">—</span></div>
+              <div class="progress"><div id="bot-batt" class="bar" style="width:80%"></div></div>
+              <div class="mini-label">Battery <span id="bot-batt-text">80%</span></div>
+            </div>
+            <div class="sys-card">
+              <div class="sys-title">DRONE-03</div>
+              <div class="sys-sub">ONLINE • AERIAL SURVEY</div>
+              <div class="progress"><div class="bar alt" style="width:78%"></div></div>
+              <div class="mini-label">Battery 78%</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel telem">
+          <h3>Telemetry</h3>
+          <div class="kv">
+            <div>Temp</div><div id="t-temp">-- °C</div>
+            <div>Gas</div><div id="t-gas">-- ppm</div>
+            <div>Pressure</div><div id="t-press">-- hPa</div>
+            <div>Vibration</div><div id="t-vib">-- g</div>
+            <div>GPS</div><div id="t-gps">-- , --</div>
+          </div>
+        </section>
+
+        <section class="panel controls">
+          <h3>Bot Control</h3>
+          <div class="pad">
+            <button class="btn dir up"    onclick="sendCmd('F')">▲</button>
+            <div class="midrow">
+              <button class="btn dir left"  onclick="sendCmd('L')">◀</button>
+              <button class="btn stop"      onclick="sendCmd('S')">■</button>
+              <button class="btn dir right" onclick="sendCmd('R')">▶</button>
+            </div>
+            <button class="btn dir down"  onclick="sendCmd('B')">▼</button>
+          </div>
+          <div class="speed">
+            <button class="pill" onclick="sendCmd('SLOW')">Slow</button>
+            <button class="pill" onclick="sendCmd('FAST')">Fast</button>
+          </div>
+          <div class="hint">Controller: Robot ESP</div>
+        </section>
+      </aside>
+
+      <!-- RIGHT -->
+      <aside class="right">
+        <section class="panel comms">
+          <h3>Communications & Logs</h3>
+          <div class="log" id="log"></div>
+          <div class="comms-actions row-icons">
+            <button class="pill" onclick="openModal('voice')">🎤 Voice</button>
+            <button class="pill" onclick="openModal('video')">📹 Video</button>
+            <button class="pill" onclick="openModal('chat')">💬 Chat</button>
+          </div>
+          <div class="ecg"><span class="line"></span></div>
+        </section>
+
+        <section class="panel network">
+          <h3>Network</h3>
+          <div class="net-wrap">
+            <div class="bars">
+              <span id="b1"></span><span id="b2"></span><span id="b3"></span><span id="b4"></span>
+            </div>
+            <div class="net-meta">
+              <div>RSSI: <span id="rssi">--</span> dBm</div>
+              <div>Quality: <span id="qual">--</span>%</div>
+            </div>
+          </div>
+          <canvas id="spark" width="260" height="56"></canvas>
+        </section>
+
+        <!-- Rescuer Prediction -->
+        <section class="panel predict">
+          <h3>Rescuer Prediction</h3>
+          <div class="row">
+            <div>Detected Survivors (live):</div><div id="ppl">0</div>
+          </div>
+          <div class="row">
+            <div>Recommended Rescuers:</div><div id="resc">2</div>
+          </div>
+          <div class="mini-note">Rule: 1–2 ➜ 2; 3–4 ➜ 4; 5–6 ➜ 6; &gt;6 ➜ ceil(1.2×N)</div>
+          <hr style="border-color:#173045; opacity:.4; margin:10px 0">
+          <div class="row">
+            <div class="inline">
+              <label for="survivor-input">Manual override:</label>
+              <input id="survivor-input" type="number" min="0" step="1" value="">
+            </div>
+            <button class="pill" id="apply-override">Apply</button>
+          </div>
+        </section>
+      </aside>
+    </div>
+    <!-- ===== TWO-WAY COMMUNICATIONS DOCK ===== -->
+<section class="panel comms-dock">
+  <div class="dock-head">
+    <h3 style="margin:0">Two-Way Communications</h3>
+    <div class="dock-chip" id="comms-chip-main">
+      <span class="d-dot"></span> Link: <span id="comms-link-state">Enabled</span>
+    </div>
+  </div>
+
+  <div class="dock-grid">
+    <!-- Operator ↔ Bot (Data/Control) -->
+    <div class="link-card" id="card-data">
+      <div class="lc-head">
+        <div class="lc-title">
+          <span class="ico">🛰️</span>
+          <div>
+            <div>Data Link</div>
+            <small>Operator ↔ BOT</small>
+          </div>
+        </div>
+        <span class="state on" id="state-data">ON</span>
+      </div>
+      <div class="lc-stats">
+        <div><label>Uplink</label><span id="ul-data">— Mbps</span></div>
+        <div><label>Downlink</label><span id="dl-data">— Mbps</span></div>
+        <div><label>Latency</label><span id="lat-data">— ms</span></div>
+        <div><label>Loss</label><span id="loss-data">— %</span></div>
+      </div>
+      <div class="lc-actions">
+        <button class="pill" onclick="openModal('chat')">Open Telemetry</button>
+      </div>
+    </div>
+
+    <!-- Voice -->
+    <div class="link-card" id="card-voice">
+      <div class="lc-head">
+        <div class="lc-title">
+          <span class="ico">🎤</span>
+          <div>
+            <div>Voice Link</div>
+            <small>Push-to-Talk</small>
+          </div>
+        </div>
+        <span class="state on" id="state-voice">ON</span>
+      </div>
+      <div class="lc-stats">
+        <div><label>Codec</label><span>Opus</span></div>
+        <div><label>Bitrate</label><span id="br-voice">— kbps</span></div>
+        <div><label>Latency</label><span id="lat-voice">— ms</span></div>
+        <div><label>Jitter</label><span id="jit-voice">— ms</span></div>
+      </div>
+      <div class="lc-actions">
+        <button class="pill" onclick="openModal('voice')">Open Voice</button>
+      </div>
+    </div>
+
+    <!-- Video -->
+    <div class="link-card" id="card-video">
+      <div class="lc-head">
+        <div class="lc-title">
+          <span class="ico">📹</span>
+          <div>
+            <div>Video Link</div>
+            <small>Aux/Remote Cam</small>
+          </div>
+        </div>
+        <span class="state on" id="state-video">ON</span>
+      </div>
+      <div class="lc-stats">
+        <div><label>Res</label><span id="res-video">—</span></div>
+        <div><label>Bitrate</label><span id="br-video">— Mbps</span></div>
+        <div><label>Latency</label><span id="lat-video">— ms</span></div>
+        <div><label>FPS</label><span id="fps-video">—</span></div>
+      </div>
+      <div class="lc-actions">
+        <button class="pill" onclick="openModal('video')">Open Video</button>
+      </div>
+    </div>
+
+    <!-- Messaging / Chat -->
+    <div class="link-card" id="card-chat">
+      <div class="lc-head">
+        <div class="lc-title">
+          <span class="ico">💬</span>
+          <div>
+            <div>Messaging</div>
+            <small>Operator ↔ Survivor</small>
+          </div>
+        </div>
+        <span class="state on" id="state-chat">ON</span>
+      </div>
+      <div class="lc-stats">
+        <div><label>Queue</label><span id="q-chat">0</span></div>
+        <div><label>Delivered</label><span id="del-chat">—</span></div>
+        <div><label>ACK</label><span id="ack-chat">— ms</span></div>
+        <div><label>Status</label><span id="st-chat">Idle</span></div>
+      </div>
+      <div class="lc-actions">
+        <button class="pill" onclick="openModal('chat')">Open Chat</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+    <!-- ===== MAP ===== -->
+    <section class="panel mapwrap">
+      <div class="map-toprow">
+        <h3 style="margin:0">Operational Map</h3>
+        <div class="legend">
+          <span><i class="swatch sw-green"></i> Low</span>
+          <span><i class="swatch sw-yellow"></i> Elevated</span>
+          <span><i class="swatch sw-orange"></i> High</span>
+          <span><i class="swatch sw-red"></i> Critical</span>
+          <span class="chip" id="comms-chip"><span class="chip-dot"></span> Two-Way Comms: Enabled</span>
+        </div>
+      </div>
+
+      <div id="map"></div>
+
+      <div class="map-tools" style="margin-top:12px">
+        <button class="pill" onclick="clearTrail()">Clear Path</button>
+        <button class="pill" onclick="setOptimizeMode(true)">Optimize Path</button>
+        <span class="muted">Tip: Click on the map to set a target.</span>
+      </div>
+    </section>
+
+    <!-- simple modals -->
+    <div class="modal" id="modal-voice">
+      <div class="modal-body">
+        <h3>Voice Link</h3>
+        <p>Hook your WebRTC/SIP here.</p>
+        <button class="pill" onclick="closeModal('voice')">Close</button>
+      </div>
+    </div>
+    <div class="modal" id="modal-video">
+      <div class="modal-body">
+        <h3>Video Link</h3>
+        <p>Attach secondary camera stream.</p>
+        <button class="pill" onclick="closeModal('video')">Close</button>
+      </div>
+    </div>
+    <div class="modal" id="modal-chat">
+      <div class="modal-body">
+        <h3>Chat</h3>
+        <p>Operator ↔ Survivor text channel.</p>
+        <button class="pill" onclick="closeModal('chat')">Close</button>
+      </div>
+    </div>
+
+  </div><!-- /.hud -->
+
+  <!-- App logic -->
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+  <!-- Google Maps API (only if you pass gmap_key in render_template) -->
+  <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key={{ gmap_key }}&libraries=geometry&callback=initMap">
+  </script>
+</body>
+</html>
