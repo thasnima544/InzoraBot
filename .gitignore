@@ -1,0 +1,39 @@
+# Python virtual envs
+venv/
+venv*/ 
+.venv/
+env/
+
+# Bytecode & build
+__pycache__/
+*.pyc
+dist/
+build/
+
+# Secrets
+.env
+
+# Binaries / large files
+*.zip
+*.7z
+*.rar
+*.iso
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.exe
+*.dll
+*.bin
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.h5
+
+# IDE / OS
+.vscode/
+.idea/
+.vs/
+Thumbs.db
+.DS_Store
